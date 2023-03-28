@@ -1,50 +1,38 @@
 # このコードはhttps://github.com/kohya-ss/sd-scripts/blob/main/finetune/tag_images_by_wd14_tagger.pyを参考にしていますというかパクっています。
+from os import PathLike
+from pathlib import Path
 
-from huggingface_hub import hf_hub_download
-import os
+from huggingface_hub import snapshot_download
 
-DEFAULT_WD14_TAGGER_REPO = "SmilingWolf/wd-v1-4-vit-tagger-v2"
+
+TAGGER_REPO = "SmilingWolf/wd-v1-4-vit-tagger-v2"
 TAGGER_DIR = "wd-v1-4-vit-tagger-v2"
-ONNX_FILE = "model.onnx"
-FILES = ["keras_metadata.pb", "saved_model.pb"]
-SUB_DIR = "variables"
-SUB_DIR_FILES = ["variables.data-00000-of-00001", "variables.index"]
+TAGGER_IGNORE = ["*.onnx", "*.md", ".git*"]
 
-ONNX_REPO = "furusu/PFG"
+PFG_REPO = "furusu/PFG"
+PFG_IGNORE = ["*.md", "*.png", ".git*"]
 ONNX_FILE = "wd-v1-4-vit-tagger-v2-last-pooling-layer.onnx"
 
 
-def download(path):
-    model_dir = os.path.join(path, TAGGER_DIR)
-    if not os.path.exists(model_dir):
-        print(f"downloading wd14 tagger model from hf_hub. id: {DEFAULT_WD14_TAGGER_REPO}")
-        for file in FILES:
-            hf_hub_download(
-                DEFAULT_WD14_TAGGER_REPO,
-                file,
-                cache_dir=model_dir,
-                force_download=True,
-                force_filename=file,
-            )
-        for file in SUB_DIR_FILES:
-            hf_hub_download(
-                DEFAULT_WD14_TAGGER_REPO,
-                file,
-                subfolder=SUB_DIR,
-                cache_dir=os.path.join(model_dir, SUB_DIR),
-                force_download=True,
-                force_filename=file,
-            )
-    else:
-        print("using existing wd14 tagger model")
-    onnx_file = os.path.join(path, ONNX_FILE)
+def download_files(models_path: PathLike):
+    if not isinstance(models_path, Path):
+        models_path = Path(models_path)
 
-    if not os.path.exists(onnx_file):
-        print(f"downloading onnx model from hf_hub.")
-        hf_hub_download(
-            ONNX_REPO,
-            ONNX_FILE,
-            cache_dir=path,
-            force_download=True,
-            force_filename=ONNX_FILE,
+    tagger_path = models_path.joinpath(TAGGER_DIR)
+    if not tagger_path.exists():
+        # Get WD14 Tagger in TensorFlow/Keras format
+        print(f"Downloading WD1.4 tagger (TensorFlow) from HF repo: {TAGGER_REPO}")
+        snapshot_download(
+            repo_id=TAGGER_REPO,
+            ignore_patterns=TAGGER_IGNORE,
+            local_dir=tagger_path,
         )
+    else:
+        print(f"WD1.4 tagger found at {tagger_path}.")
+
+    print(f"Updating ONNX tagger and model tensors from HF repo: {PFG_REPO}")
+    snapshot_download(
+        repo_id=PFG_REPO,
+        ignore_patterns=PFG_IGNORE,
+        local_dir=models_path,
+    )

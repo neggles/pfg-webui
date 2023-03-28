@@ -1,38 +1,70 @@
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from pathlib import Path
 
-import torch
-import numpy as np
-from modules import devices
-
-import modules.scripts as scripts
 import gradio as gr
-
-from modules.script_callbacks import CFGDenoiserParams, on_cfg_denoiser
-
-from modules.processing import StableDiffusionProcessing
-
-from scripts.dbimutils import smart_imread_pil, smart_24bit, make_square, smart_resize
-from scripts.download_model import download, TAGGER_DIR, ONNX_FILE
+import numpy as np
+import torch
 from PIL import Image
 
-import os
+from modules import scripts  # type: ignore
+from modules.processing import StableDiffusionProcessing  # type: ignore
+from modules.script_callbacks import CFGDenoiserParams, on_cfg_denoiser  # type: ignore
+
+from dbimutils import make_square, smart_24bit, smart_imread_pil, smart_resize
+from download_model import TAGGER_DIR, ONNX_FILE, download_files
 
 # extensions/pfg-webui直下のパス
-CURRENT_DIRECTORY = scripts.basedir()
+EXTN_ROOT = Path(scripts.basedir())
+MODELS_PATH = EXTN_ROOT.joinpath("models")
+
+ONNX_PATH = MODELS_PATH.joinpath(ONNX_FILE)
+TAGGER_PATH = MODELS_PATH.joinpath(TAGGER_DIR)
+
+# Check for TensorFlow/Keras and import if available
+HAS_TF = False
+try:
+    import tensorflow as tf
+    from keras.models import Model, load_model
+
+    HAS_TF = True
+except ImportError as e:
+    print(f"Failed to import TensorFlow and Keras: {e}")
+
+# Check for ONNX runtime and import it if available
+HAS_ONNX = False
+try:
+    import onnxruntime
+
+    HAS_ONNX = True
+except ImportError as e:
+    print(f"Failed to import ONNX Runtime: {e}")
+
+if not (HAS_TF or HAS_ONNX):
+    raise ImportError("Neither TensorFlow/Keras nor ONNX Runtime are available, PFG cannot be used.")
 
 
 class Script(scripts.Script):
     def __init__(self):
-        self.model_list = [
-            file
-            for file in os.listdir(os.path.join(CURRENT_DIRECTORY, "models/"))
-            if file != "put_models_here.txt"
-        ]
-        download(CURRENT_DIRECTORY)
+        # Get/update needed model files
+        download_files(models_path=MODELS_PATH)
+
+        # Save list of available models
+        self.model_list = [file.name for file in MODELS_PATH.glob("*.{pt,safetensors}")]
+        self.callbacks_added = False
+
+        # Initial values for processing
+        self.use_onnx = False
+        self.image: Image = None
+        self.sub_image: Image = None
+        self.pfg_scale: float = 1.0
+        self.pfg_num_tokens: float = 10.0
+        self.batch_size: int = 1
+
+        # Initial values for model
+        self.weight = None
+        self.bias = None
 
     def title(self):
-        return "PFG for webui"
+        return "Prompt-Free Generation"
 
     # どうやらこれをやるとタブに常に表示されるらしい。
     def show(self, is_img2img):
@@ -53,7 +85,7 @@ class Script(scripts.Script):
                         minimum=0, maximum=20, step=1.0, value=10.0, label="pfg num tokens"
                     )
                 with gr.Row():
-                    use_onnx = gr.Checkbox(value=False, label="use onnx")
+                    use_onnx = gr.Checkbox(value=False, label="Use ONNX instead of TensorFlow")
                 with gr.Row():
                     sub_image = gr.Image(type="pil", label="sub image for latent couple")
 
@@ -106,6 +138,33 @@ class Script(scripts.Script):
             if params.sampling_step == 0:
                 print(f"Apply pfg num_tokens:{self.pfg_num_tokens}(this message will be duplicated)")
 
+    def load_tagger(self, use_onnx: bool):
+        if use_onnx:
+            if not HAS_ONNX:
+                raise ImportError("ONNX Runtime is not available, must use TensorFlow/Keras.")
+            self.tagger = onnxruntime.InferenceSession(
+                ONNX_PATH,
+                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            )
+        else:
+            if not HAS_TF:
+                raise ImportError("TensorFlow is not available, must use ONNX.")
+            # なんもいみわかっとらんけどこれしないとVRAMくわれる。対応するバージョンもよくわからない
+            physical_devices = tf.config.list_physical_devices("GPU")
+            if len(physical_devices) > 0:
+                for device in physical_devices:
+                    tf.config.experimental.set_memory_growth(device, True)
+                    print(
+                        f"{device} memory growth enabled: {tf.config.experimental.get_memory_growth(device)}"
+                    )
+            else:
+                print(f"No GPU devices available, cannot use TensorFlow/Keras model")
+                raise RuntimeError("No GPU devices available for TensorFlow/Keras model")
+
+            self.tagger = load_model(TAGGER_PATH)
+            # 最終層手前のプーリング層の出力を使う
+            self.tagger = Model(self.tagger.layers[0].input, self.tagger.layers[-3].output)
+
     def process(
         self,
         p: StableDiffusionProcessing,
@@ -127,41 +186,13 @@ class Script(scripts.Script):
         self.pfg_num_tokens = pfg_num_tokens
         self.batch_size = p.batch_size
 
-        pfg_weight = torch.load(os.path.join(CURRENT_DIRECTORY, "models/" + pfg_path))
+        pfg_weight = torch.load(MODELS_PATH.joinpath(pfg_path))
         self.weight = pfg_weight["pfg_linear.weight"].cpu()  # 大した計算じゃないのでcpuでいいでしょう
         self.bias = pfg_weight["pfg_linear.bias"].cpu()
 
-        if not hasattr(self, "tagger") or self.use_onnx != use_onnx:
-            if use_onnx:
-                import onnxruntime
-
-                self.tagger = onnxruntime.InferenceSession(
-                    os.path.join(CURRENT_DIRECTORY, ONNX_FILE),
-                    providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-                )
-            else:
-                import tensorflow as tf
-                from tensorflow.keras.models import load_model, Model
-
-                # なんもいみわかっとらんけどこれしないとVRAMくわれる。対応するバージョンもよくわからない
-                physical_devices = tf.config.list_physical_devices("GPU")
-                if len(physical_devices) > 0:
-                    for device in physical_devices:
-                        tf.config.experimental.set_memory_growth(device, True)
-                        print(
-                            "{} memory growth: {}".format(
-                                device, tf.config.experimental.get_memory_growth(device)
-                            )
-                        )
-                else:
-                    print("Not enough GPU hardware devices available")
-
-                self.tagger = load_model(os.path.join(CURRENT_DIRECTORY, TAGGER_DIR))
-                self.tagger = Model(
-                    self.tagger.layers[0].input, self.tagger.layers[-3].output
-                )  # 最終層手前のプーリング層の出力を使う
-
-        self.use_onnx = use_onnx
+        if self.tagger is None or use_onnx != self.use_onnx:
+            self.load_tagger(use_onnx=use_onnx)
+            self.use_onnx = use_onnx
 
         pfg_feature = self.infer(self.image) * self.pfg_scale
         # (768,) -> (dim * num_tokens, )
@@ -170,14 +201,14 @@ class Script(scripts.Script):
         # (dim * num_tokens, ) -> (1, num_tokens, dim)
         self.pfg_cond = self.pfg_cond.reshape(1, self.pfg_num_tokens, -1)
 
-        if sub_image is not None:
+        if self.sub_image is not None:
             pfg_feature_sub = self.infer(self.sub_image) * self.pfg_scale
             self.pfg_cond_sub = self.weight @ pfg_feature_sub + self.bias
             self.pfg_cond_sub = self.pfg_cond_sub.reshape(1, self.pfg_num_tokens, -1)
         else:
             self.pfg_feature_sub = None
 
-        if not hasattr(self, "callbacks_added"):
+        if self.callbacks_added is not True:
             on_cfg_denoiser(self.denoiser_callback)
             self.callbacks_added = True
 
