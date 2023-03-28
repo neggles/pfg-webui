@@ -1,16 +1,16 @@
 from pathlib import Path
 
+import modules.scripts as scripts  # type: ignore
 import gradio as gr
 import numpy as np
 import torch
 from PIL import Image
 
-from modules import scripts  # type: ignore
 from modules.processing import StableDiffusionProcessing  # type: ignore
 from modules.script_callbacks import CFGDenoiserParams, on_cfg_denoiser  # type: ignore
 
-from dbimutils import make_square, smart_24bit, smart_imread_pil, smart_resize
-from download_model import TAGGER_DIR, ONNX_FILE, download_files
+from scripts.dbimutils import make_square, smart_24bit, smart_imread_pil, smart_resize
+from scripts.download_model import TAGGER_DIR, ONNX_FILE, download
 
 # extensions/pfg-webui直下のパス
 EXTN_ROOT = Path(scripts.basedir())
@@ -45,7 +45,7 @@ if not (HAS_TF or HAS_ONNX):
 class Script(scripts.Script):
     def __init__(self):
         # Get/update needed model files
-        download_files(models_path=MODELS_PATH)
+        download(models_path=MODELS_PATH)
 
         # Save list of available models
         self.model_list = [file.name for file in MODELS_PATH.glob("*.{pt,safetensors}")]

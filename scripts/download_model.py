@@ -14,7 +14,7 @@ PFG_IGNORE = ["*.md", "*.png", ".git*"]
 ONNX_FILE = "wd-v1-4-vit-tagger-v2-last-pooling-layer.onnx"
 
 
-def download_files(models_path: PathLike):
+def download(models_path: PathLike):
     if not isinstance(models_path, Path):
         models_path = Path(models_path)
 
@@ -36,3 +36,12 @@ def download_files(models_path: PathLike):
         ignore_patterns=PFG_IGNORE,
         local_dir=models_path,
     )
+
+
+__all__ = [
+    "download",
+    "TAGGER_DIR",
+    "TAGGER_REPO",
+    "PFG_REPO",
+    "ONNX_FILE",
+]
