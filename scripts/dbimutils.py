@@ -5,11 +5,13 @@ import cv2
 import numpy as np
 from PIL import Image
 
-#pil -> cv2に改変：gradio用
-def smart_imread_pil(img:Image, flag=cv2.IMREAD_UNCHANGED):
+
+# pil -> cv2に改変：gradio用
+def smart_imread_pil(img: Image, flag=cv2.IMREAD_UNCHANGED):
     img = img.convert("RGB")
     img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     return img
+
 
 def smart_imread(img, flag=cv2.IMREAD_UNCHANGED):
     if img.endswith(".gif"):
@@ -45,9 +47,7 @@ def make_square(img, target_size):
     left, right = delta_w // 2, delta_w - (delta_w // 2)
 
     color = [255, 255, 255]
-    new_im = cv2.copyMakeBorder(
-        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
-    )
+    new_im = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return new_im
 
 
