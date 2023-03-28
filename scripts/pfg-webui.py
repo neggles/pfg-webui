@@ -23,7 +23,7 @@ TAGGER_PATH = MODELS_PATH.joinpath(TAGGER_DIR)
 HAS_TF = False
 try:
     import tensorflow as tf
-    from keras.models import Model, load_model
+    from tensorflow.keras.models import Model, load_model
 
     HAS_TF = True
 except ImportError as e:
@@ -48,7 +48,9 @@ class Script(scripts.Script):
         download(models_path=MODELS_PATH)
 
         # Save list of available models
+        print(f"PFG loading models from {MODELS_PATH}")
         self.model_list = [file.name for file in MODELS_PATH.glob("*.{pt,safetensors}")]
+        print(f"Loaded models: {self.model_list}")
         self.callbacks_added = False
 
         # Initial values for processing
@@ -72,24 +74,25 @@ class Script(scripts.Script):
 
     def ui(self, is_img2img):
         with gr.Group():
-            with gr.Accordion("PFG", open=False):
-                enabled = gr.Checkbox(value=False, label="Enable")
-                with gr.Row():
-                    image = gr.Image(type="pil", label="guide image")
-                with gr.Row():
-                    pfg_scale = gr.Slider(minimum=0, maximum=3, step=0.05, label="pfg scale", value=1.0)
-                with gr.Row():
-                    pfg_path = gr.Dropdown(self.model_list, label="pfg model", value=None)
-                with gr.Row():
-                    pfg_num_tokens = gr.Slider(
-                        minimum=0, maximum=20, step=1.0, value=10.0, label="pfg num tokens"
-                    )
-                with gr.Row():
+            with gr.Accordion("Prompt-Free Generation", open=False):
+                with gr.Row(variant="compact"):
+                    enabled = gr.Checkbox(value=False, label="Enabled")
                     use_onnx = gr.Checkbox(value=False, label="Use ONNX instead of TensorFlow")
+                with gr.Row():
+                    image = gr.Image(type="pil", label="Guide Image")
+                with gr.Row(variant="compact"):
+                    with gr.Column(scale=1, min_width=100):
+                        pfg_model = gr.Dropdown(self.model_list, label="Model", value=None)
+                    with gr.Column(scale=2, min_width=200):
+                        pfg_scale = gr.Slider(minimum=0, maximum=3, step=0.05, label="PFG scale", value=1.0)
+                    with gr.Column(scale=2, min_width=200):
+                        pfg_num_tokens = gr.Slider(
+                            minimum=0, maximum=20, step=1.0, value=10.0, label="Tokens"
+                        )
                 with gr.Row():
                     sub_image = gr.Image(type="pil", label="sub image for latent couple")
 
-        return enabled, image, pfg_scale, pfg_path, pfg_num_tokens, use_onnx, sub_image
+        return enabled, image, pfg_scale, pfg_model, pfg_num_tokens, use_onnx, sub_image
 
     # wd-14-taggerの推論関数
     def infer(self, img: Image):
@@ -171,7 +174,7 @@ class Script(scripts.Script):
         enabled: bool,
         image: Image,
         pfg_scale: float,
-        pfg_path: str,
+        pfg_model: str,
         pfg_num_tokens: int,
         use_onnx: bool,
         sub_image: Image = None,
@@ -186,7 +189,7 @@ class Script(scripts.Script):
         self.pfg_num_tokens = pfg_num_tokens
         self.batch_size = p.batch_size
 
-        pfg_weight = torch.load(MODELS_PATH.joinpath(pfg_path))
+        pfg_weight = torch.load(MODELS_PATH.joinpath(pfg_model))
         self.weight = pfg_weight["pfg_linear.weight"].cpu()  # 大した計算じゃないのでcpuでいいでしょう
         self.bias = pfg_weight["pfg_linear.bias"].cpu()
 
