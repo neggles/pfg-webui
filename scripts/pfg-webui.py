@@ -42,6 +42,16 @@ if not (HAS_TF or HAS_ONNX):
     raise ImportError("Neither TensorFlow/Keras nor ONNX Runtime are available, PFG cannot be used.")
 
 
+def is_model(file: Path):
+    if not file.is_file():
+        return False
+    if file.name.startswith("."):
+        return False
+    if any(file.suffix.endswith(x) for x in ["onnx", "pt", "safetensors", ".pb"]):
+        return True
+    return False
+
+
 class Script(scripts.Script):
     def __init__(self):
         # Get/update needed model files
@@ -49,7 +59,7 @@ class Script(scripts.Script):
 
         # Save list of available models
         print(f"PFG loading models from {MODELS_PATH}")
-        self.model_list = [file.name for file in MODELS_PATH.glob("*.{pt,safetensors}")]
+        _ = self.get_model_list()
         print(f"Loaded models: {self.model_list}")
         self.callbacks_added = False
 
@@ -64,6 +74,14 @@ class Script(scripts.Script):
         # Initial values for model
         self.weight = None
         self.bias = None
+
+    def get_model_list(self):
+        model_list = [x.name for x in MODELS_PATH.iterdir() if is_model(x)]
+        if not model_list:
+            raise FileNotFoundError("No models found in the models directory.")
+        else:
+            self.model_list = model_list
+        return self.model_list
 
     def title(self):
         return "Prompt-Free Generation"
@@ -81,11 +99,11 @@ class Script(scripts.Script):
                 with gr.Row():
                     image = gr.Image(type="pil", label="Guide Image")
                 with gr.Row(variant="compact"):
-                    with gr.Column(scale=1, min_width=100):
-                        pfg_model = gr.Dropdown(self.model_list, label="Model", value=None)
-                    with gr.Column(scale=2, min_width=200):
+                    with gr.Column(scale=2, min_width=120):
+                        pfg_model = gr.Dropdown(self.get_model_list(), label="Model", value=None)
+                    with gr.Column(scale=3, min_width=240):
                         pfg_scale = gr.Slider(minimum=0, maximum=3, step=0.05, label="PFG scale", value=1.0)
-                    with gr.Column(scale=2, min_width=200):
+                    with gr.Column(scale=3, min_width=240):
                         pfg_num_tokens = gr.Slider(
                             minimum=0, maximum=20, step=1.0, value=10.0, label="Tokens"
                         )
