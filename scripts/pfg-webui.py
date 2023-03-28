@@ -23,7 +23,7 @@ TAGGER_PATH = MODELS_PATH.joinpath(TAGGER_DIR)
 HAS_TF = False
 try:
     import tensorflow as tf
-    from tensorflow.keras.models import Model, load_model
+    from keras.models import Model, load_model
 
     HAS_TF = True
 except ImportError as e:
@@ -43,9 +43,7 @@ if not (HAS_TF or HAS_ONNX):
 
 
 def is_model(file: Path):
-    if not file.is_file():
-        return False
-    if file.name.startswith("."):
+    if file.is_dir():
         return False
     if any(file.suffix.endswith(x) for x in ["onnx", "pt", "safetensors", ".pb"]):
         return True
@@ -59,7 +57,7 @@ class Script(scripts.Script):
 
         # Save list of available models
         print(f"PFG loading models from {MODELS_PATH}")
-        _ = self.get_model_list()
+        self.model_list = self.get_model_list()
         print(f"Loaded models: {self.model_list}")
         self.callbacks_added = False
 
@@ -78,10 +76,10 @@ class Script(scripts.Script):
     def get_model_list(self):
         model_list = [x.name for x in MODELS_PATH.iterdir() if is_model(x)]
         if not model_list:
-            raise FileNotFoundError("No models found in the models directory.")
+            print(f"No models found in the models directory ({MODELS_PATH.resolve()})")
         else:
             self.model_list = model_list
-        return self.model_list
+        return model_list
 
     def title(self):
         return "Prompt-Free Generation"

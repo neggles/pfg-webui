@@ -36,12 +36,3 @@ def download(models_path: PathLike):
         ignore_patterns=PFG_IGNORE,
         local_dir=models_path,
     )
-
-
-__all__ = [
-    "download",
-    "TAGGER_DIR",
-    "TAGGER_REPO",
-    "PFG_REPO",
-    "ONNX_FILE",
-]
